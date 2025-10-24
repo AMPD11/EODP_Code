@@ -38,6 +38,7 @@ class l1b(initL1b):
                 # Do the equalization and save to file
                 toa = self.equalization(toa, eq_add, eq_mult)
                 writeToa(self.outdir, self.globalConfig.l1b_toa_eq + band, toa)
+                self.plotL1bEq(toa, self.outdir, band)
 
             # Restitution (absolute radiometric gain)
             # -------------------------------------------------------------------------------
@@ -62,7 +63,9 @@ class l1b(initL1b):
         :param eq_mult: Gain factor, adimensional
         :return: TOA in DN, equalized
         """
-        #TODO
+        # if eq_add.ndim == 1:  eq_add = eq_add[np.newaxis, :]
+        # if eq_mult.ndim == 1: eq_mult = eq_mult[np.newaxis, :]
+        # return (toa - eq_add) / eq_mult
         return toa
 
     def restoration(self,toa,gain):
@@ -72,11 +75,43 @@ class l1b(initL1b):
         :param gain: gain in [rad/DN]
         :return: TOA in radiances [mW/sr/m2]
         """
-        #TODO
+        # toa = toa * float(gain)
         self.logger.debug('Sanity check. TOA in radiances after gain application ' + str(toa[1,-1]) + ' [mW/m2/sr]')
-
         return toa
 
+    def _save_heatmap(self, img, path, title, cbar_label):
+        plt.figure()
+        plt.imshow(img, origin="lower")
+        plt.colorbar(label=cbar_label)
+        plt.title(title)
+        plt.tight_layout()
+        plt.savefig(path, dpi=150)
+        plt.close()
+
+    def _save_col_profile(self, img, path, title, y_label):
+        prof = img.mean(axis=0)  # media por columnas
+        x = np.arange(prof.size)
+        plt.figure()
+        plt.plot(x, prof)
+        plt.title(title)
+        plt.xlabel("act_columns")
+        plt.ylabel(y_label)
+        plt.tight_layout()
+        plt.savefig(path, dpi=150)
+        plt.close()
+
     def plotL1bToa(self, toa_l1b, outputdir, band):
-        #TODO
-        a=1 # dummy
+        """PNG del producto restaurado (radiancias)."""
+        idx = band.split('-')[-1]  # "0","1","2","3"
+        heatmap = os.path.join(outputdir, f"l1b_toa_VNIR-{idx}.png")
+        profpng = os.path.join(outputdir, f"l1b_toa_VNIR-{idx}_profile.png")
+        self._save_heatmap(toa_l1b, heatmap, f"L1B TOA {band}", "TOA [mW/m²/sr]")
+        self._save_col_profile(toa_l1b, profpng, f"L1B TOA column-mean {band}", "TOA [mW/m²/sr]")
+
+    def plotL1bEq(self, toa_eq, outputdir, band):
+        """PNG del intermedio equalizado (DN)."""
+        idx = band.split('-')[-1]
+        heatmap = os.path.join(outputdir, f"l1b_toa_eq_VNIR-{idx}.png")
+        profpng = os.path.join(outputdir, f"l1b_toa_eq_VNIR-{idx}_profile.png")
+        self._save_heatmap(toa_eq, heatmap, f"Equalized TOA {band}", "DN")
+        self._save_col_profile(toa_eq, profpng, f"Equalized TOA column-mean {band}", "DN")
