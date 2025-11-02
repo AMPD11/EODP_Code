@@ -104,7 +104,17 @@ class detectionPhase(initIsm):
         :param wv: Central wavelength of the band [m]
         :return: Toa in photons
         """
-        #TODO
+        h = 6.62607015e-34  # Planck [J·s]
+        c = 299792458.0  # speed of light [m/s]
+
+        # mW/m^2 -> W/m^2
+        E_Wm2 = toa.astype(np.float64, copy=False) * 1e-3
+
+        # Photon energy [J]
+        E_photon = h * c / float(wv)
+
+        # Photons collected
+        toa_ph = (E_Wm2 * float(tint) * float(area_pix)) / E_photon
         return toa_ph
 
     def phot2Electr(self, toa, QE):
@@ -114,7 +124,10 @@ class detectionPhase(initIsm):
         :param QE: Quantum efficiency [e-/ph]
         :return: toa in electrons
         """
-        #TODO
+        # Convert photons to electrons via QE (e-/ph)
+        toae = np.asarray(toa, dtype=np.float64) * np.asarray(QE, dtype=np.float64)
+        # Guard against tiny negative numerical noise
+        toae = np.where(toae < 0.0, 0.0, toae)
         return toae
 
     def badDeadPixels(self, toa,bad_pix,dead_pix,bad_pix_red,dead_pix_red):
