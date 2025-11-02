@@ -69,7 +69,24 @@ class mtf:
 
         # Calculate the System MTF
         self.logger.debug("Calculation of the Sysmtem MTF by multiplying the different contributors")
-        Hsys = 1 # dummy
+        # Ensure all are float64 and within [0,1]
+        Hdiff = np.asarray(Hdiff, dtype=np.float64)
+        Hdefoc = np.asarray(Hdefoc, dtype=np.float64)
+        Hwfe = np.asarray(Hwfe, dtype=np.float64)
+        Hdet = np.asarray(Hdet, dtype=np.float64)
+        Hsmear = np.asarray(Hsmear, dtype=np.float64)
+        Hmotion = np.asarray(Hmotion, dtype=np.float64)
+
+        # Shapes must all match (nlines, ncolumns)
+        if not (Hdiff.shape == Hdefoc.shape == Hwfe.shape == Hdet.shape == Hsmear.shape == Hmotion.shape):
+            raise ValueError(
+                f"MTF contributors have mismatched shapes: "
+                f"diff{Hdiff.shape}, def{Hdefoc.shape}, wfe{Hwfe.shape}, det{Hdet.shape}, "
+                f"smear{Hsmear.shape}, mot{Hmotion.shape}"
+            )
+
+        Hsys = Hdiff * Hdefoc * Hwfe * Hdet * Hsmear * Hmotion
+        Hsys = np.clip(Hsys, 0.0, 1.0)
 
         # Plot cuts ACT/ALT of the MTF
         self.plotMtf(Hdiff, Hdefoc, Hwfe, Hdet, Hsmear, Hmotion, Hsys, nlines, ncolumns, fnAct, fnAlt, directory, band)
