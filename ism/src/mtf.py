@@ -115,9 +115,13 @@ class mtf:
         :param fr2D: 2D relative frequencies (f/fc), where fc is the optics cut-off frequency
         :return: diffraction MTF
         """
-        #TODO
-        return Hdiff
+        nu = np.clip(fr2D, 0.0, None).astype(np.float64)
+        Hdiff = np.zeros_like(nu, dtype=np.float64)
 
+        mask = nu <= 1.0
+        x = nu[mask]
+        Hdiff[mask] = (2.0 / np.pi) * (np.arccos(x) - x * np.sqrt(1.0 - x * x))
+        return Hdiff
 
     def mtfDefocus(self, fr2D, defocus, focal, D):
         """
@@ -128,7 +132,13 @@ class mtf:
         :param D: Telescope diameter [m]
         :return: Defocus MTF
         """
-        #TODO
+        nu = np.asarray(fr2D, dtype=np.float64)
+        # Scale factor: defocus is given as defocus/(f/N). For low values (0–2),
+        # a quadratic attenuation in frequency is adequate.
+        alpha = float(defocus)
+        Hdefoc = np.exp(-(np.pi * alpha * nu) ** 2)
+        # Numerical safety and bounds
+        Hdefoc = np.clip(Hdefoc, 0.0, 1.0)
         return Hdefoc
 
     def mtfWfeAberrations(self, fr2D, lambd, kLF, wLF, kHF, wHF):
@@ -142,7 +152,18 @@ class mtf:
         :param wHF: RMS of high-frequency wavefront errors [m]
         :return: WFE Aberrations MTF
         """
-        #TODO
+        nu = np.asarray(fr2D, dtype=np.float64)
+
+        # Phase RMS (dimensionless) for each regime
+        aLF = 2.0 * np.pi * (float(wLF) / float(lambd))
+        aHF = 2.0 * np.pi * (float(wHF) / float(lambd))
+
+        # Empirical attenuation; kLF/kHF scale how fast the MTF decays with frequency
+        Hlf = np.exp(-(kLF * aLF * nu) ** 2)
+        Hhf = np.exp(-(kHF * aHF * nu) ** 2)
+
+        Hwfe = Hlf * Hhf
+        Hwfe = np.clip(Hwfe, 0.0, 1.0)
         return Hwfe
 
     def mtfDetector(self,fn2D):
@@ -151,7 +172,9 @@ class mtf:
         :param fnD: 2D normalised frequencies (f/(1/w))), where w is the pixel width
         :return: detector MTF
         """
-        #TODO
+        fn = np.asarray(fn2D, dtype=np.float64)
+        Hdet = np.sinc(fn)  # = sin(pi*fn)/(pi*fn), with Hdet(0)=1
+        Hdet = np.clip(Hdet, 0.0, 1.0)
         return Hdet
 
     def mtfSmearing(self, fnAlt, ncolumns, ksmear):
@@ -162,7 +185,12 @@ class mtf:
         :param ksmear: Amplitude of low-frequency component for the motion smear MTF in ALT [pixels]
         :return: Smearing MTF
         """
-        #TODO
+        fnAlt = np.asarray(fnAlt, dtype=np.float64)
+        frAlt = 0.5 * fnAlt  # cycles/pixel
+        Halt = np.sinc(ksmear * frAlt)  # sin(pi*x)/(pi*x)
+        Halt = np.clip(Halt, 0.0, 1.0)
+
+        Hsmear = np.tile(Halt[:, None], (1, ncolumns))
         return Hsmear
 
     def mtfMotion(self, fn2D, kmotion):
@@ -172,7 +200,10 @@ class mtf:
         :param kmotion: Amplitude of high-frequency component for the motion smear MTF in ALT and ACT
         :return: detector MTF
         """
-        #TODO
+        fn = np.asarray(fn2D, dtype=np.float64)
+        fr = 0.5 * fn  # cycles/pixel
+        Hmotion = np.sinc(kmotion * fr)
+        Hmotion = np.clip(Hmotion, 0.0, 1.0)
         return Hmotion
 
     def plotMtf(self,Hdiff, Hdefoc, Hwfe, Hdet, Hsmear, Hmotion, Hsys, nlines, ncolumns, fnAct, fnAlt, directory, band):
