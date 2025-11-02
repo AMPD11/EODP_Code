@@ -112,81 +112,68 @@ class opticalPhase(initIsm):
         if toa.shape[0] % 2 or toa.shape[1] % 2:
             # If ever you run odd sizes, import ifftshift and use it here.
             raise ValueError("Odd-sized arrays require ifftshift; import it to proceed.")
-        G = fftshift(Gc)  # back to uncentered layout
+        G  = np.fft.ifftshift(Gc)
 
         toa_ft = np.real(ifft2(G))
         return toa_ft
 
     def spectralIntegration(self, sgm_toa, sgm_wv, band):
         """
-        Integration with the ISRF to retrieve one band
-        :param sgm_toa: Spectrally oversampled TOA cube 3D in irradiances [mW/m2]
-        :param sgm_wv: wavelengths of the input TOA cube
-        :param band: band
-        :return: TOA image 2D in radiances [mW/m2]
+        Integrate the hyperspectral cube with the ISRF to get a single band.
+        :param sgm_toa: 3D TOA cube [mW/m2/sr] (ALT, ACT, λ)
+        :param sgm_wv: wavelengths of the TOA cube (λ vector)
+        :param band: band name, e.g., "VNIR-0"
+        :return: 2D TOA image [mW/m2/sr]
         """
+        # Load ISRF
         isrf_dir = self.auxdir.rstrip('/\\') + '/isrf/'
         isrf_name = 'isrf_' + band
-
-        # Leer ISRF
         isrf_resp, isrf_wv = readIsrf(isrf_dir, isrf_name)
+
+        # Arrays
+        sgm_toa = np.asarray(sgm_toa, dtype=np.float64)
+        sgm_wv = np.asarray(sgm_wv, dtype=np.float64).squeeze()
         isrf_resp = np.asarray(isrf_resp, dtype=np.float64).squeeze()
         if isrf_wv is None:
-            isrf_wv = np.asarray(sgm_wv, dtype=np.float64).squeeze()
+            isrf_wv = sgm_wv.copy()
         else:
             isrf_wv = np.asarray(isrf_wv, dtype=np.float64).squeeze()
 
-        # --- 1) Normalizar unidades a METROS (detección heurística) ---
-        def to_meters(wv):
-            wv = np.asarray(wv, dtype=np.float64)
-            mx = float(np.nanmax(wv))
-            # Heurística:
-            #   [200, 5000]     -> nanómetros
-            #   [0.2, 5]        -> micrómetros
-            #   [1e-7, 1e-5]    -> metros ya
-            if 200.0 <= mx <= 5000.0:  # nm
-                return wv * 1e-9
-            if 0.2 <= mx <= 5.0:  # micras
-                return wv * 1e-6
-            return wv  # asumimos m
+        # Make ISRF wavelengths use the same unit as sgm_wv (nm/um heuristics)
+        # target: unit of sgm_wv
+        max_s = float(np.nanmax(sgm_wv))
+        max_i = float(np.nanmax(isrf_wv))
 
-        sgm_wv_m = to_meters(sgm_wv)
-        isrf_wv_m = to_meters(isrf_wv)
+        # If sgm is in nm (~200..5000) and ISRF in um (~0.2..5) -> convert um->nm
+        if 200.0 <= max_s <= 5000.0 and 0.1 <= max_i <= 10.0:
+            isrf_wv = isrf_wv * 1000.0
+        # If sgm is in um (~0.2..5) and ISRF in nm (~200..5000) -> convert nm->um
+        elif 0.1 <= max_s <= 10.0 and 200.0 <= max_i <= 5000.0:
+            isrf_wv = isrf_wv / 1000.0
+        # else: assume same unit already
 
-        # --- 2) Sanitizar ISRF (no negativos) y normalizar área ---
+        # Clip negatives and build safe interpolation
         isrf_resp = np.clip(isrf_resp, 0.0, None)
         if not np.any(isrf_resp > 0):
-            raise ValueError(f"ISRF '{band}' vacío o negativo")
-        # Normalización por integral discreta (espaciado real en su rejilla)
-        area = np.trapz(isrf_resp, isrf_wv_m)
-        if area <= 0:
-            raise ValueError(f"ISRF '{band}' con área nula")
-        isrf_resp /= area
+            raise ValueError(f"ISRF '{band}' is empty or negative.")
 
-        # --- 3) Verificar solape espectral real ---
-        lo = max(np.min(isrf_wv_m), np.min(sgm_wv_m))
-        hi = min(np.max(isrf_wv_m), np.max(sgm_wv_m))
-        if not (lo < hi):
-            raise ValueError(
-                f"Sin solape espectral para {band}. "
-                f"ISRF=[{np.min(isrf_wv_m):.3e},{np.max(isrf_wv_m):.3e}] m, "
-                f"SGM=[{np.min(sgm_wv_m):.3e},{np.max(sgm_wv_m):.3e}] m"
-            )
-
-        # --- 4) Interpolar el ISRF a la rejilla del SGM y RENORMALIZAR solo en el solape ---
-        f = interp1d(isrf_wv_m, isrf_resp, kind="linear",
+        # Interpolate ISRF onto sgm_wv, zero outside overlap
+        f = interp1d(isrf_wv, isrf_resp, kind="linear",
                      bounds_error=False, fill_value=0.0, assume_sorted=False)
-        weights = f(sgm_wv_m)  # en m
-        # Cero fuera del solape, renormaliza solo con los >0
-        mask = weights > 0
-        ws = float(np.trapz(weights[mask], sgm_wv_m[mask])) if np.any(mask) else 0.0
-        if ws <= 0:
-            raise ValueError(
-                f"Interpolación del ISRF a SGM dio suma nula en {band}. "
-                f"Revisa unidades y rango espectral."
-            )
-        weights /= ws
+        w = f(sgm_wv)
 
-        # --- 5) Integración espectral discreta (pesa por 'weights') ---
-        toa = np.tensordot(sgm_toa.astype(np.float64), weights, axes=([2], [0]))
+        # Overlap mask and renormalization on the sgm grid
+        ov = w > 0.0
+        if not np.any(ov):
+            raise ValueError(f"No spectral overlap for {band} after unit alignment.")
+
+        # Normalize area on the target grid (PDF-like weights)
+        area = np.trapz(w[ov], sgm_wv[ov])
+        if area <= 0:
+            raise ValueError(f"ISRF '{band}' has zero area on the target grid.")
+        w /= area
+
+        # Weighted spectral integration: (ALT, ACT, λ) · (λ) -> (ALT, ACT)
+        toa = np.tensordot(sgm_toa, w, axes=([2], [0]))
+
         return toa
