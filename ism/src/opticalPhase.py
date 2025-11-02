@@ -104,12 +104,18 @@ class opticalPhase(initIsm):
         :param Hsys: System MTF
         :return: TOA image in irradiances [mW/m2]
         """
-        F = fft2(toa.astype(np.float64))
-        Fc = fftshift(F)
+        F = fft2(toa.astype(np.float64))  # uncentered spectrum (zero freq at [0,0])
+        Fc = fftshift(F)  # center it to match Hsys
         if Hsys.shape != Fc.shape:
             raise ValueError(f"MTF shape {Hsys.shape} != FFT shape {Fc.shape}")
-        Gc = Fc * Hsys
-        G = ifftshift(Gc)
+        Gc = Fc * Hsys  # filtering in centered frequency domain
+
+        # For even-sized arrays, fftshift == ifftshift
+        if toa.shape[0] % 2 or toa.shape[1] % 2:
+            # If ever you run odd sizes, import ifftshift and use it here.
+            raise ValueError("Odd-sized arrays require ifftshift; import it to proceed.")
+        G = fftshift(Gc)  # back to uncentered layout
+
         toa_ft = np.real(ifft2(G))
         return toa_ft
 
