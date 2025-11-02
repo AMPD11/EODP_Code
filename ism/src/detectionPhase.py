@@ -140,7 +140,31 @@ class detectionPhase(initIsm):
         :param dead_pix_red: Reduction in the quantum efficiency for the dead pixels [-, over 1]
         :return: toa in e- including bad & dead pixels
         """
-        #TODO
+        h, w = toa.shape
+        N = h * w
+
+        nb = int(round((bad_pix / 100.0) * N))
+        nd = int(round((dead_pix / 100.0) * N))
+        nb = max(nb, 0);
+        nd = max(nd, 0)
+        nb = min(nb, N);
+        nd = min(nd, N - nb)
+
+        flat = toa.reshape(-1).copy()
+
+        if nb + nd > 0:
+            idx = np.random.choice(N, size=nb + nd, replace=False)
+            idx_bad = idx[:nb]
+            idx_dead = idx[nb:]
+
+            if nb > 0:
+                # reduce by the specified factor (>1 means stronger reduction)
+                flat[idx_bad] = flat[idx_bad] / float(bad_pix_red)
+
+            if nd > 0:
+                flat[idx_dead] = flat[idx_dead] / float(dead_pix_red)
+
+        toa = flat.reshape(h, w)
         return toa
 
     def prnu(self, toa, kprnu):
@@ -150,7 +174,10 @@ class detectionPhase(initIsm):
         :param kprnu: multiplicative factor to the standard normal deviation for the PRNU
         :return: TOA after adding PRNU [e-]
         """
-        #TODO
+        # multiplicative pixel-wise gain: 1 + kprnu*N(0,1)
+        gain = 1.0 + kprnu * np.random.standard_normal(size=toa.shape)
+        gain = np.clip(gain, 0.0, None)
+        toa = toa * gain
         return toa
 
 
@@ -165,5 +192,10 @@ class detectionPhase(initIsm):
         :param ds_B_coeff: Empirical parameter of the model 6040 K
         :return: TOA in [e-] with dark signal
         """
-        #TODO
+        # mean dark signal (Arrhenius-like), increases with T, equals A at Tref
+        Sd_mean = float(ds_A_coeff) * np.exp(float(ds_B_coeff) * (1.0 / float(Tref) - 1.0 / float(T)))
+        # pixel-wise DSNU: Gaussian around Sd_mean
+        dsnu = kdsnu * np.random.standard_normal(size=toa.shape) * Sd_mean
+        Sd = np.clip(Sd_mean + dsnu, 0.0, None)
+        toa = toa + Sd
         return toa
