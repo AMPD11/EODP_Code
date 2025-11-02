@@ -55,9 +55,8 @@ class videoChainPhase(initIsm):
         :param gain_adc: Gain of the Analog-to-digital conversion [-]
         :return: output toa in [V]
         """
-        #TODO
-        # TOA_v = (N_e) * OCF * Gain
-        return np.asarray(toa) * OCF * gain_adc
+        toa_v = np.asarray(toa, dtype=np.float64) * float(OCF) * float(gain_adc)
+        return toa_v
 
     def digitisation(self, toa, bit_depth, min_voltage, max_voltage):
         """
@@ -68,7 +67,15 @@ class videoChainPhase(initIsm):
         :param max_voltage: maximum voltage
         :return: toa in digital counts
         """
-        #TODO
-        satvalue = (2**bit_depth - 1)
+        toa_v = np.asarray(toa, dtype=np.float64)
+
+        satvalue = (1 << int(bit_depth)) - 1
+        rng = float(max_voltage) - float(min_voltage)
+        if rng <= 0:
+            raise ValueError("max_voltage must be greater than min_voltage")
+
+        toa_dn = (toa_v - float(min_voltage)) * (satvalue / rng)
+        toa_dn = np.rint(toa_dn)  # nearest integer code
+        toa_dn = np.clip(toa_dn, 0, satvalue)  # saturate to [0, 2^N-1]
         return toa_dn
 
