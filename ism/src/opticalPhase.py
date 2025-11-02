@@ -92,9 +92,10 @@ class opticalPhase(initIsm):
         :param Tr: Optical transmittance [-]
         :return: TOA image in irradiances [mW/m2]
         """
-        # TODO
+        omega = (pi / 4.0) * (D / f) ** 2
+        scale = Tr * omega
+        toa = toa.astype(np.float64, copy=False) * scale
         return toa
-
 
     def applySysMtf(self, toa, Hsys):
         """
@@ -103,7 +104,13 @@ class opticalPhase(initIsm):
         :param Hsys: System MTF
         :return: TOA image in irradiances [mW/m2]
         """
-        # TODO
+        F = fft2(toa.astype(np.float64))
+        Fc = fftshift(F)
+        if Hsys.shape != Fc.shape:
+            raise ValueError(f"MTF shape {Hsys.shape} != FFT shape {Fc.shape}")
+        Gc = Fc * Hsys
+        G = ifftshift(Gc)
+        toa_ft = np.real(ifft2(G))
         return toa_ft
 
     def spectralIntegration(self, sgm_toa, sgm_wv, band):
@@ -114,7 +121,33 @@ class opticalPhase(initIsm):
         :param band: band
         :return: TOA image 2D in radiances [mW/m2]
         """
-        # TODO
+        isrf_dir = self.auxdir.rstrip('/\\') + '/isrf/'
+        isrf_name = 'isrf_' + band
+
+        # Read ISRF response and its wavelength axis
+        isrf_resp, isrf_wv = readIsrf(isrf_dir, isrf_name)
+        isrf_resp = np.asarray(isrf_resp, dtype=np.float64).squeeze()
+        isrf_wv = sgm_wv if isrf_wv is None else np.asarray(isrf_wv, dtype=np.float64).squeeze()
+
+        # Non-negative and normalize area to 1
+        isrf_resp = np.clip(isrf_resp, 0.0, None)
+        s = float(isrf_resp.sum())
+        if s <= 0:
+            raise ValueError(f"ISRF has zero/negative area for band {band}")
+        isrf_resp /= s
+
+        # Align spectral grids (interpolate if needed), then renormalize
+        if isrf_wv.size != sgm_wv.size or np.max(np.abs(isrf_wv - sgm_wv)) > 1e-12:
+            f = interp1d(isrf_wv, isrf_resp, kind="linear", bounds_error=False, fill_value=0.0)
+            weights = f(sgm_wv).astype(np.float64)
+            ws = float(weights.sum())
+            if ws > 0:
+                weights /= ws
+        else:
+            weights = isrf_resp
+
+        # Spectral integration along wavelength axis
+        toa = np.tensordot(sgm_toa.astype(np.float64), weights, axes=([2], [0]))
         return toa
 
 
