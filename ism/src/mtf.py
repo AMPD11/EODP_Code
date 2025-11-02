@@ -91,7 +91,22 @@ class mtf:
         :return fnAct: 1D normalised frequencies 2D ACT (f/(1/w))
         :return fnAlt: 1D normalised frequencies 2D ALT (f/(1/w))
         """
-        #TODO
+        # 1D frequency axes in cycles/pixel
+        frAct = np.fft.fftshift(np.fft.fftfreq(ncolumns, d=1.0))
+        frAlt = np.fft.fftshift(np.fft.fftfreq(nlines, d=1.0))
+
+        # Normalize to Nyquist (0.5 cycles/pixel)
+        fnyq = 0.5
+        fnAct = frAct / fnyq
+        fnAlt = frAlt / fnyq
+
+        # 2D grids (relative and normalized)
+        FrX, FrY = np.meshgrid(frAct, frAlt)
+        FnX, FnY = np.meshgrid(fnAct, fnAlt)
+
+        # Radial frequency
+        fr2D = np.sqrt(FrX ** 2 + FrY ** 2)  # cycles/pixel
+        fn2D = np.sqrt(FnX ** 2 + FnY ** 2)  # normalized to Nyquist
         return fn2D, fr2D, fnAct, fnAlt
 
     def mtfDiffract(self,fr2D):
