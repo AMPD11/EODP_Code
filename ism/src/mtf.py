@@ -108,22 +108,29 @@ class mtf:
         :return fnAct: 1D normalised frequencies 2D ACT (f/(1/w))
         :return fnAlt: 1D normalised frequencies 2D ALT (f/(1/w))
         """
-        # 1D frequency axes in cycles/pixel
-        frAct = np.fft.fftshift(np.fft.fftfreq(ncolumns, d=1.0))
-        frAlt = np.fft.fftshift(np.fft.fftfreq(nlines, d=1.0))
+        # 1) Discrete frequency axes in cycles/pixel (un-normalized to Nyquist)
+        fr_act_pix = np.fft.fftshift(np.fft.fftfreq(ncolumns, d=1.0))  # cycles/pixel
+        fr_alt_pix = np.fft.fftshift(np.fft.fftfreq(nlines, d=1.0))  # cycles/pixel
 
-        # Normalize to Nyquist (0.5 cycles/pixel)
+        # 2) Normalized-to-Nyquist (Nyquist = 0.5 cycles/pixel)
         fnyq = 0.5
-        fnAct = frAct / fnyq
-        fnAlt = frAlt / fnyq
+        fnAct = fr_act_pix / fnyq
+        fnAlt = fr_alt_pix / fnyq
 
-        # 2D grids (relative and normalized)
-        FrX, FrY = np.meshgrid(frAct, frAlt)
-        FnX, FnY = np.meshgrid(fnAct, fnAlt)
+        # 3) Build 2-D grids
+        FRx, FRy = np.meshgrid(fr_act_pix, fr_alt_pix)  # cycles/pixel
+        FNx, FNy = np.meshgrid(fnAct, fnAlt)  # f / f_Nyq
 
-        # Radial frequency
-        fr2D = np.sqrt(FrX ** 2 + FrY ** 2)  # cycles/pixel
-        fn2D = np.sqrt(FnX ** 2 + FnY ** 2)  # normalized to Nyquist
+        # 4) Magnitudes
+        f_pix = np.sqrt(FRx ** 2 + FRy ** 2)  # cycles/pixel
+        fn2D = np.sqrt(FNx ** 2 + FNy ** 2)  # normalized to Nyquist
+
+        # 5) Convert to relative-to-cutoff: fr2D = (f / f_c)
+        #    spatial freq [cycles/m] = (cycles/pixel) / w
+        f_spatial = f_pix / float(w)  # cycles/m
+        f_c = float(D) / (float(lambd) * float(focal))  # cycles/m
+        fr2D = f_spatial / f_c  # dimensionless
+
         return fn2D, fr2D, fnAct, fnAlt
 
     def mtfDiffract(self,fr2D):
@@ -132,12 +139,12 @@ class mtf:
         :param fr2D: 2D relative frequencies (f/fc), where fc is the optics cut-off frequency
         :return: diffraction MTF
         """
-        nu = np.clip(fr2D, 0.0, None).astype(np.float64)
+        nu = np.asarray(fr2D, dtype=np.float64)
+        nu = np.clip(nu, 0.0, None)
         Hdiff = np.zeros_like(nu, dtype=np.float64)
-
-        mask = nu <= 1.0
-        x = nu[mask]
-        Hdiff[mask] = (2.0 / np.pi) * (np.arccos(x) - x * np.sqrt(1.0 - x * x))
+        m = nu <= 1.0
+        x = nu[m]
+        Hdiff[m] = (2.0 / np.pi) * (np.arccos(x) - x * np.sqrt(1.0 - x * x))
         return Hdiff
 
     def mtfDefocus(self, fr2D, defocus, focal, D):

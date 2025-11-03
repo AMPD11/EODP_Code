@@ -2,7 +2,7 @@
 from ism.src.initIsm import initIsm
 from math import pi
 from ism.src.mtf import mtf
-from numpy.fft import fftshift, ifft2, fft2
+from numpy.fft import fftshift, ifft2, fft2, ifftshift
 import numpy as np
 from common.io.writeToa import writeToa
 from common.io.readIsrf import readIsrf
@@ -102,19 +102,21 @@ class opticalPhase(initIsm):
         :param Hsys: System MTF
         :return: TOA image in irradiances [mW/m2]
         """
-        F = fft2(toa.astype(np.float64))  # uncentered spectrum (zero freq at [0,0])
-        Fc = fftshift(F)  # center it to match Hsys
-        if Hsys.shape != Fc.shape:
-            raise ValueError(f"MTF shape {Hsys.shape} != FFT shape {Fc.shape}")
-        Gc = Fc * Hsys  # filtering in centered frequency domain
+        # Build PSF from centered MTF
+        H_un = ifftshift(Hsys)  # move DC to [0,0] for IFFT
+        psf0 = np.real(ifft2(H_un))  # impulse response
+        psf = fftshift(psf0)  # center the PSF peak
 
-        # For even-sized arrays, fftshift == ifftshift
-        if toa.shape[0] % 2 or toa.shape[1] % 2:
-            # If ever you run odd sizes, import ifftshift and use it here.
-            raise ValueError("Odd-sized arrays require ifftshift; import it to proceed.")
-        G  = np.fft.ifftshift(Gc)
+        # Normalize PSF to unity DC gain (numerical safety)
+        s = psf.sum()
+        if s != 0:
+            psf = psf / s
 
-        toa_ft = np.real(ifft2(G))
+        # Linear convolution with symmetric boundary to avoid wrap-around artefacts
+        toa_ft = convolve2d(toa.astype(np.float64), psf, mode='same', boundary='symm')
+
+        # Clamp tiny negatives from numerical noise
+        toa_ft = np.where(toa_ft < 0.0, 0.0, toa_ft)
         return toa_ft
 
     def spectralIntegration(self, sgm_toa, sgm_wv, band):
