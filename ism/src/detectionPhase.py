@@ -143,27 +143,49 @@ class detectionPhase(initIsm):
         h, w = toa.shape
         N = h * w
 
-        nb = int(round((bad_pix / 100.0) * N))
-        nd = int(round((dead_pix / 100.0) * N))
-        nb = max(nb, 0);
-        nd = max(nd, 0)
-        nb = min(nb, N);
-        nd = min(nd, N - nb)
+        # Interpret inputs robustly: >1 => percent, <=1 => fraction
+        def as_frac(x):
+            x = float(x)
+            return x / 100.0 if x > 1.0 else x
 
-        flat = toa.reshape(-1).copy()
+        p_bad = as_frac(bad_pix)
+        p_dead = as_frac(dead_pix)
+
+        # Counts
+        nb = int(round(p_bad * N))
+        nd = int(round(p_dead * N))
+        nb = max(0, min(nb, N))
+        nd = max(0, min(nd, N - nb))
+
+        # Flat copy
+        flat = toa.reshape(-1).astype(np.float64, copy=True)
 
         if nb + nd > 0:
             idx = np.random.choice(N, size=nb + nd, replace=False)
             idx_bad = idx[:nb]
             idx_dead = idx[nb:]
 
+            # BAD pixels: attenuation
             if nb > 0:
-                # reduce by the specified factor (>1 means stronger reduction)
-                flat[idx_bad] = flat[idx_bad] / float(bad_pix_red)
+                if bad_pix_red <= 1.0:
+                    # keep this fraction (e.g., 0.8 -> 80%)
+                    flat[idx_bad] *= float(bad_pix_red)
+                else:
+                    # divide by factor (>1)
+                    flat[idx_bad] /= float(bad_pix_red)
 
+            # DEAD pixels: set to zero (typical model)
             if nd > 0:
-                flat[idx_dead] = flat[idx_dead] / float(dead_pix_red)
+                flat[idx_dead] = 0.0
 
+            # Logging like the teacher’s output
+            self.logger.debug(f"Number of bad pixels {nb} & dead pixels {nd}")
+
+            if nb > 0:
+                self.logger.debug(f"Idx bad [{idx_bad[0]}]" if len(idx_bad) > 0 else "Idx bad []")
+                self.logger.debug(f"TOA bad [{flat[idx_bad[0]]}]" if len(idx_bad) > 0 else "TOA bad []")
+
+        flat = np.clip(flat, 0.0, None)
         toa = flat.reshape(h, w)
         return toa
 
@@ -174,9 +196,13 @@ class detectionPhase(initIsm):
         :param kprnu: multiplicative factor to the standard normal deviation for the PRNU
         :return: TOA after adding PRNU [e-]
         """
-        # multiplicative pixel-wise gain: 1 + kprnu*N(0,1)
-        gain = 1.0 + kprnu * np.random.standard_normal(size=toa.shape)
-        gain = np.clip(gain, 0.0, None)
+        h, w = toa.shape
+        # 1D gaussiana por columna (media 0, sigma=kprnu)
+        noise_col = np.random.standard_normal(w) * float(kprnu)
+        # Recorte suave para evitar colas largas (outliers)
+        lim = 3.0 * float(kprnu)
+        noise_col = np.clip(noise_col, -lim, lim)  # [-3σ, +3σ]
+        gain = 1.0 + noise_col[None, :]  # (1 × w) -> broadcast a (h × w)
         toa = toa * gain
         return toa
 
