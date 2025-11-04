@@ -127,55 +127,55 @@ class opticalPhase(initIsm):
         :param band: band name, e.g., "VNIR-0"
         :return: 2D TOA image [mW/m2/sr]
         """
-        # Load ISRF
+        # Read ISRF (response and its wavelength grid)
         isrf_dir = self.auxdir.rstrip('/\\') + '/isrf/'
         isrf_name = 'isrf_' + band
         isrf_resp, isrf_wv = readIsrf(isrf_dir, isrf_name)
 
-        # Arrays
-        sgm_toa = np.asarray(sgm_toa, dtype=np.float64)
-        sgm_wv = np.asarray(sgm_wv, dtype=np.float64).squeeze()
-        isrf_resp = np.asarray(isrf_resp, dtype=np.float64).squeeze()
+        sgm_toa = np.asarray(sgm_toa, dtype=np.float64)  # (ALT, ACT, Ls)
+        sgm_wv = np.asarray(sgm_wv, dtype=np.float64).squeeze()  # (Ls,)
+        isrf_r = np.asarray(isrf_resp, dtype=np.float64).squeeze()
+
+        # ISRF wavelength vector
         if isrf_wv is None:
-            isrf_wv = sgm_wv.copy()
+            isrf_w = sgm_wv.copy()
         else:
-            isrf_wv = np.asarray(isrf_wv, dtype=np.float64).squeeze()
+            isrf_w = np.asarray(isrf_wv, dtype=np.float64).squeeze()
 
-        # Make ISRF wavelengths use the same unit as sgm_wv (nm/um heuristics)
-        # target: unit of sgm_wv
+        # Harmonize nm/um (simple heuristic)
         max_s = float(np.nanmax(sgm_wv))
-        max_i = float(np.nanmax(isrf_wv))
-
-        # If sgm is in nm (~200..5000) and ISRF in um (~0.2..5) -> convert um->nm
+        max_i = float(np.nanmax(isrf_w))
         if 200.0 <= max_s <= 5000.0 and 0.1 <= max_i <= 10.0:
-            isrf_wv = isrf_wv * 1000.0
-        # If sgm is in um (~0.2..5) and ISRF in nm (~200..5000) -> convert nm->um
+            isrf_w = isrf_w * 1000.0
         elif 0.1 <= max_s <= 10.0 and 200.0 <= max_i <= 5000.0:
-            isrf_wv = isrf_wv / 1000.0
-        # else: assume same unit already
+            isrf_w = isrf_w / 1000.0
 
-        # Clip negatives and build safe interpolation
-        isrf_resp = np.clip(isrf_resp, 0.0, None)
-        if not np.any(isrf_resp > 0):
-            raise ValueError(f"ISRF '{band}' is empty or negative.")
+        # Clip negative ISRF
+        isrf_r = np.clip(isrf_r, 0.0, None)
 
-        # Interpolate ISRF onto sgm_wv, zero outside overlap
-        f = interp1d(isrf_wv, isrf_resp, kind="linear",
-                     bounds_error=False, fill_value=0.0, assume_sorted=False)
-        w = f(sgm_wv)
+        # Interpolate the spectral cube onto the ISRF wavelength grid, per pixel
+        # Build 1D interpolator over sgm_wv for each (ALT, ACT)
+        # Result: cube on ISRF grid, shape (ALT, ACT, Li)
+        Li = isrf_w.shape[0]
+        ALT, ACT, _ = sgm_toa.shape
+        toa_on_isrf = np.empty((ALT, ACT, Li), dtype=np.float64)
 
-        # Overlap mask and renormalization on the sgm grid
-        ov = w > 0.0
-        if not np.any(ov):
-            raise ValueError(f"No spectral overlap for {band} after unit alignment.")
+        # Pre-build interpolator kind
+        from scipy.interpolate import interp1d
+        # Vectorized over last dim by looping spatial pixels (fast enough for 100x150x600)
+        for i in range(ALT):
+            row = sgm_toa[i, :, :]  # (ACT, Ls)
+            for j in range(ACT):
+                f = interp1d(sgm_wv, row[j, :], kind='linear',
+                             bounds_error=False, fill_value=0.0, assume_sorted=False)
+                toa_on_isrf[i, j, :] = f(isrf_w)
 
-        # Normalize area on the target grid (PDF-like weights)
-        area = np.trapz(w[ov], sgm_wv[ov])
-        if area <= 0:
-            raise ValueError(f"ISRF '{band}' has zero area on the target grid.")
-        w /= area
+        # Weighted integration on the ISRF grid, normalized by the ISRF area
+        area = np.trapz(isrf_r, isrf_w)  # scalar
+        if area <= 0.0:
+            raise ValueError(f"ISRF '{band}' has zero area on its native grid.")
 
-        # Weighted spectral integration: (ALT, ACT, λ) · (λ) -> (ALT, ACT)
-        toa = np.tensordot(sgm_toa, w, axes=([2], [0]))
+        num = np.trapz(toa_on_isrf * isrf_r[None, None, :], isrf_w, axis=2)  # (ALT, ACT)
+        toa = num / area  # (ALT, ACT)
 
         return toa
