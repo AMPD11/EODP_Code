@@ -36,6 +36,6 @@ overall = np.mean(results)
 print(f"\nOverall mean compliance = {overall:.6f}%")
 
 if overall > 99.73:
-    print("✅ PASS (≥ 3σ = 99.73%)")
+    print("PASS (≥ 3σ = 99.73%)")
 else:
-    print("❌ FAIL (requirement: ≥ 99.73%)")
+    print("FAIL (requirement: ≥ 99.73%)")
