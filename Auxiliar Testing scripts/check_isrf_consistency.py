@@ -1,7 +1,6 @@
 import os
 import numpy as np
 import xarray as xr
-from netCDF4 import Dataset
 
 # Paths
 ref_dir = r"C:\Users\Andrei\Documents\MiSE\3.1 Semester\Earth Observation Data Processing\data\EODP-TS-ISM\output"
