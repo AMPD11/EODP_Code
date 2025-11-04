@@ -102,21 +102,21 @@ class opticalPhase(initIsm):
         :param Hsys: System MTF
         :return: TOA image in irradiances [mW/m2]
         """
-        # Build PSF from centered MTF
-        H_un = ifftshift(Hsys)  # move DC to [0,0] for IFFT
-        psf0 = np.real(ifft2(H_un))  # impulse response
-        psf = fftshift(psf0)  # center the PSF peak
+        # FFT of the image (DC at [0,0] in numpy's fft2)
+        F = np.fft.fft2(np.asarray(toa, dtype=np.float64))
 
-        # Normalize PSF to unity DC gain (numerical safety)
-        s = psf.sum()
-        if s != 0:
-            psf = psf / s
+        # Move Hsys DC from center to [0,0] to match fft2 layout
+        H00 = np.fft.ifftshift(Hsys)
 
-        # Linear convolution with symmetric boundary to avoid wrap-around artefacts
-        toa_ft = convolve2d(toa.astype(np.float64), psf, mode='same', boundary='symm')
+        # Frequency-domain filtering (circular convolution)
+        G = F * H00
 
-        # Clamp tiny negatives from numerical noise
+        # Back to spatial domain, real part
+        toa_ft = np.real(np.fft.ifft2(G))
+
+        # Numerical guard
         toa_ft = np.where(toa_ft < 0.0, 0.0, toa_ft)
+
         return toa_ft
 
     def spectralIntegration(self, sgm_toa, sgm_wv, band):
