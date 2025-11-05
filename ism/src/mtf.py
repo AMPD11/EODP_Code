@@ -178,11 +178,11 @@ class mtf:
         """
         nu = np.asarray(fr2D, dtype=np.float64)
 
-        # Phase RMS (dimensionless) for each regime
-        aLF = 2.0 * np.pi * (float(wLF) / float(lambd))
-        aHF = 2.0 * np.pi * (float(wHF) / float(lambd))
+        # Phase RMS in waves (no 2π): φ_rms = w/λ
+        aLF = float(wLF) / float(lambd)
+        aHF = float(wHF) / float(lambd)
 
-        # Empirical attenuation; kLF/kHF scale how fast the MTF decays with frequency
+        # Empirical attenuation (softer than using 2π)
         Hlf = np.exp(-(kLF * aLF * nu) ** 2)
         Hhf = np.exp(-(kHF * aHF * nu) ** 2)
 
