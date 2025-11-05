@@ -197,6 +197,7 @@ class mtf:
         :return: detector MTF
         """
         fn = np.asarray(fn2D, dtype=np.float64)
+        fn = 0.5 * fn  # cycles/pixel
         Hdet = np.sinc(fn)  # = sin(pi*fn)/(pi*fn), with Hdet(0)=1
         Hdet = np.clip(Hdet, 0.0, 1.0)
         return Hdet
@@ -248,6 +249,112 @@ class mtf:
         :param band: band
         :return: N/A
         """
-        #TODO
+
+        # Save 2D fields to .nc (same naming as reference)
+        # writeMat(dir, "basename_without_ext", array)
+        writeMat(directory, f"Hdiff_{band}", Hdiff)
+        writeMat(directory, f"Hdefoc_{band}", Hdefoc)
+        writeMat(directory, f"Hwfe_{band}", Hwfe)
+        writeMat(directory, f"Hdet_{band}", Hdet)
+        writeMat(directory, f"Hsmear_{band}", Hsmear)
+        writeMat(directory, f"Hmotion_{band}", Hmotion)
+        writeMat(directory, f"Hsys_{band}", Hsys)
+
+        # Frequency axes in cycles/pixel (normalized-to-Nyquist axes are fnAct/fnAlt)
+        # We want 0..Nyquist (0.5 cycles/pixel)
+        fr_act = 0.5 * np.asarray(fnAct, dtype=np.float64)  # shape (ncolumns,)
+        fr_alt = 0.5 * np.asarray(fnAlt, dtype=np.float64)  # shape (nlines,)
+
+        # Central indices (DC across the orthogonal axis)
+        i_c = nlines // 2
+        j_c = ncolumns // 2
+
+        # ACT slice (row center, vary ACT frequency)
+        s_diff_act = Hdiff[i_c, :]
+        s_defoc_act = Hdefoc[i_c, :]
+        s_hwfe_act = Hwfe[i_c, :]
+        s_det_act = Hdet[i_c, :]
+        s_smear_act = Hsmear[i_c, :]
+        s_motion_act = Hmotion[i_c, :]
+        s_sys_act = Hsys[i_c, :]
+
+        # ALT slice (column center, vary ALT frequency)
+        s_diff_alt = Hdiff[:, j_c]
+        s_defoc_alt = Hdefoc[:, j_c]
+        s_hwfe_alt = Hwfe[:, j_c]
+        s_det_alt = Hdet[:, j_c]
+        s_smear_alt = Hsmear[:, j_c]
+        s_motion_alt = Hmotion[:, j_c]
+        s_sys_alt = Hsys[:, j_c]
+
+        # Keep non-negative half (from DC to Nyquist)
+        # fftshift-like layout: DC is in the middle
+        def pos_half(axis, y):
+            mid = len(axis) // 2
+            return axis[mid:], y[mid:]
+
+        x_act, y_diff_act = pos_half(fr_act, s_diff_act)
+        _, y_defoc_act = pos_half(fr_act, s_defoc_act)
+        _, y_hwfe_act = pos_half(fr_act, s_hwfe_act)
+        _, y_det_act = pos_half(fr_act, s_det_act)
+        _, y_smear_act = pos_half(fr_act, s_smear_act)
+        _, y_motion_act = pos_half(fr_act, s_motion_act)
+        _, y_sys_act = pos_half(fr_act, s_sys_act)
+
+        x_alt, y_diff_alt = pos_half(fr_alt, s_diff_alt)
+        _, y_defoc_alt = pos_half(fr_alt, s_defoc_alt)
+        _, y_hwfe_alt = pos_half(fr_alt, s_hwfe_alt)
+        _, y_det_alt = pos_half(fr_alt, s_det_alt)
+        _, y_smear_alt = pos_half(fr_alt, s_smear_alt)
+        _, y_motion_alt = pos_half(fr_alt, s_motion_alt)
+        _, y_sys_alt = pos_half(fr_alt, s_sys_alt)
+
+        # Plot helper
+        def plot_one(x, curves, labels, title, fname):
+            plt.figure(figsize=(10, 5))
+            for y, lab in zip(curves, labels):
+                plt.plot(x, y, linewidth=2, label=lab)
+            plt.axvline(0.5, linestyle="--", color="k", linewidth=2)  # Nyquist
+            plt.xlim(0.0, 0.5)
+            plt.ylim(0.0, 1.05)
+            plt.xlabel("Spatial frequencies f/(1/w) [-]")
+            plt.ylabel("MTF")
+            plt.title(title)
+            plt.grid(True, alpha=0.25)
+            plt.legend(loc="lower left", ncol=2, fontsize=9)
+            os.makedirs(directory, exist_ok=True)
+            plt.tight_layout()
+            plt.savefig(os.path.join(directory, fname), dpi=200)
+            plt.close()
+
+        labels = [
+            "Diffraction MTF", "Defocus MTF", "WFE Aberrations MTF",
+            "Detector MTF", "Smearing MTF", "Motion blur MTF", "System MTF"
+        ]
+
+        plot_one(
+            x_act,
+            [y_diff_act, y_defoc_act, y_hwfe_act, y_det_act, y_smear_act, y_motion_act, y_sys_act],
+            labels,
+            f"System MTF slice ACT for {band}",
+            f"MTF_ACT_{band}.png"
+        )
+        plot_one(
+            x_alt,
+            [y_diff_alt, y_defoc_alt, y_hwfe_alt, y_det_alt, y_smear_alt, y_motion_alt, y_sys_alt],
+            labels,
+            f"System MTF slice ALT for {band}",
+            f"MTF_ALT_{band}.png"
+        )
+
+        # MTF at Nyquist (last point)
+        mtf_nyq_act = float(y_sys_act[-1]) if len(y_sys_act) else np.nan
+        mtf_nyq_alt = float(y_sys_alt[-1]) if len(y_sys_alt) else np.nan
+
+        # Log and save a tiny text report per band
+        if self.logger:
+            self.logger.info(f"{band}: MTF_Nyquist ACT={mtf_nyq_act:.4f}, ALT={mtf_nyq_alt:.4f}")
+        with open(os.path.join(directory, f"MTF_Nyquist_{band}.txt"), "w", encoding="utf-8") as f:
+            f.write(f"{band}: MTF_Nyquist ACT={mtf_nyq_act:.6f}, ALT={mtf_nyq_alt:.6f}\n")
 
 
